@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configurationDescriptor version="100">
+  <logicalFolder name="root" displayName="root" projectFiles="true" kind="ROOT">
+    <logicalFolder name="HeaderFiles"
+                   displayName="Header Files"
+                   projectFiles="true">
+      <itemPath>GPIOClass.hpp</itemPath>
+      <itemPath>Identity.hpp</itemPath>
+      <itemPath>KalmanFilter.hpp</itemPath>
+      <itemPath>LEDClass.hpp</itemPath>
+      <itemPath>MotorDriver.hpp</itemPath>
+      <itemPath>MotorEncoder.hpp</itemPath>
+      <itemPath>PIDClass.hpp</itemPath>
+      <itemPath>RotaryEncoder.hpp</itemPath>
+      <itemPath>ServoClass.hpp</itemPath>
+      <itemPath>SoftPWM.hpp</itemPath>
+      <itemPath>Test.hpp</itemPath>
+      <itemPath>UDPClass.hpp</itemPath>
+    </logicalFolder>
+    <logicalFolder name="ResourceFiles"
+                   displayName="Resource Files"
+                   projectFiles="true">
+    </logicalFolder>
+    <logicalFolder name="SourceFiles"
+                   displayName="Source Files"
+                   projectFiles="true">
+      <itemPath>GPIOClass.cpp</itemPath>
+      <itemPath>Identity.cpp</itemPath>
+      <itemPath>KalmanFilter.cpp</itemPath>
+      <itemPath>LEDClass.cpp</itemPath>
+      <itemPath>MotorDriver.cpp</itemPath>
+      <itemPath>MotorEncoder.cpp</itemPath>
+      <itemPath>PIDClass.cpp</itemPath>
+      <itemPath>RotaryEncoder.cpp</itemPath>
+      <itemPath>ServoClass.cpp</itemPath>
+      <itemPath>SoftPWM.cpp</itemPath>
+      <itemPath>Test.cpp</itemPath>
+      <itemPath>UDPClass.cpp</itemPath>
+      <itemPath>main.cpp</itemPath>
+    </logicalFolder>
+    <logicalFolder name="TestFiles"
+                   displayName="Test Files"
+                   projectFiles="false"
+                   kind="TEST_LOGICAL_FOLDER">
+    </logicalFolder>
+    <logicalFolder name="ExternalFiles"
+                   displayName="Important Files"
+                   projectFiles="false"
+                   kind="IMPORTANT_FILES_FOLDER">
+      <itemPath>Makefile</itemPath>
+    </logicalFolder>
+  </logicalFolder>
+  <projectmakefile>Makefile</projectmakefile>
+  <confs>
+    <conf name="Debug" type="1">
+      <toolsSet>
+        <compilerSet>GNU|GNU</compilerSet>
+        <dependencyChecking>true</dependencyChecking>
+        <rebuildPropChanged>false</rebuildPropChanged>
+      </toolsSet>
+      <compileType>
+        <cTool>
+          <incDir>
+            <pElem>/usr/local/include/mraa/api</pElem>
+            <pElem>/usr/local/include/upm</pElem>
+          </incDir>
+          <incFile>
+            <pElem>KalmanFilter.hpp</pElem>
+          </incFile>
+        </cTool>
+        <ccTool>
+          <standard>8</standard>
+          <incDir>
+            <pElem>/usr/local/include/mraa/api</pElem>
+            <pElem>/usr/local/include/upm</pElem>
+          </incDir>
+        </ccTool>
+        <linkerTool>
+          <commandlineTool>g++</commandlineTool>
+          <linkerLibItems>
+            <linkerOptionItem>-lmraa -lm -pthread </linkerOptionItem>
+            <linkerOptionItem>-lupm-pca9685 -lupm-i2clcd</linkerOptionItem>
+            <linkerOptionItem>-lupm-mpu9150 -lupm-nunchuck</linkerOptionItem>
+            <linkerOptionItem>-lupm-lcm1602</linkerOptionItem>
+          </linkerLibItems>
+        </linkerTool>
+      </compileType>
+      <item path="GPIOClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="GPIOClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="Identity.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="Identity.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="KalmanFilter.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="KalmanFilter.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="LEDClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="LEDClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="MotorDriver.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="MotorDriver.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="MotorEncoder.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="MotorEncoder.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="PIDClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="PIDClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="RotaryEncoder.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="RotaryEncoder.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="ServoClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="ServoClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="SoftPWM.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="SoftPWM.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="Test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="Test.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="UDPClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="UDPClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="main.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+    </conf>
+    <conf name="Release" type="1">
+      <toolsSet>
+        <compilerSet>default</compilerSet>
+        <dependencyChecking>true</dependencyChecking>
+        <rebuildPropChanged>false</rebuildPropChanged>
+      </toolsSet>
+      <compileType>
+        <cTool>
+          <developmentMode>5</developmentMode>
+        </cTool>
+        <ccTool>
+          <developmentMode>5</developmentMode>
+        </ccTool>
+        <fortranCompilerTool>
+          <developmentMode>5</developmentMode>
+        </fortranCompilerTool>
+        <asmTool>
+          <developmentMode>5</developmentMode>
+        </asmTool>
+      </compileType>
+      <item path="GPIOClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="GPIOClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="Identity.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="Identity.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="KalmanFilter.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="KalmanFilter.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="LEDClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="LEDClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="MotorDriver.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="MotorDriver.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="MotorEncoder.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="MotorEncoder.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="PIDClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="PIDClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="RotaryEncoder.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="RotaryEncoder.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="ServoClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="ServoClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="SoftPWM.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="SoftPWM.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="Test.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="Test.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="UDPClass.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+      <item path="UDPClass.hpp" ex="false" tool="3" flavor2="0">
+      </item>
+      <item path="main.cpp" ex="false" tool="1" flavor2="0">
+      </item>
+    </conf>
+  </confs>
+</configurationDescriptor>

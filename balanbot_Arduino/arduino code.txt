@@ -1,0 +1,497 @@
+#include <Arduino.h>
+#include <SoftwareSerial.h>
+#include <EEPROM.h>
+#include "PIDClass.h"
+#include "MotorDrive.h"
+#include "I2Cdev.h"
+#include "MPU6050_6Axis_MotionApps20.h"
+#include "KalmanFilter.h"
+
+#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+    #include "Wire.h"
+#endif
+MPU6050 mpu;
+// define wire pins
+#define PA 5
+#define MA1 8
+#define MA2 9
+#define PB 6
+#define MB1 4
+#define MB2 12
+#define STBY 7  //10
+#define RX 10
+#define TX 11
+
+//#define EEPROM_OPEN
+
+//define id
+//define udp
+
+// EEProm Start address of PID
+int addr = 0;
+
+
+int LeftStep = 0, RightStep = 0;  // count step of motor by accumulating PWM
+
+float zero = 5.0f;
+int motor_min = 0; // minimum motor rotate pwm 20 for
+// Control values
+float driveTrim = 0;  // receive Drive command from user
+float turnTrim = 0;   // receive Turn command from user
+float maxDrive = 130;   // maximum allowed drive value
+float maxTurn = 30;    // maximum allowed turn value
+//float maxAngle = 5.0f;
+//float SP_L, SP_R; // left and right setpoint
+float smoothedDriveTrim = 0;
+float smoothedTurnTrim = 0;
+
+// State values
+int Running = 1;
+int inRunAwayState = 0;
+int inFalloverState = 0;    //Used to flag when Eddie has fallen over and disables motors
+int inSteadyState = 0;      //Used to flag how long Eddie is being held upright in a steady state and will enable motors
+
+//define PID controller
+PIDClass controller;
+
+//PID for pitch angle
+PID_t pitchPID[2];  
+int pitchPIDoutput[2] = {0};  // PWM input values
+float pidP_P_GAIN, pidP_I_GAIN, pidP_D_GAIN, pidP_I_LIMIT, pidP_EMA_SAMPLES;
+
+//PID Controllers for wheel position
+PID_t speedPID[2];  
+float speedPIDoutput[2] = {0};
+float pidS_P_GAIN, pidS_I_GAIN, pidS_D_GAIN, pidS_I_LIMIT, pidS_EMA_SAMPLES;
+
+// PID Controller for orientation 
+PID_t oriPID;   
+float oriOutput = 0;
+float pidOri_P_GAIN, pidOri_I_GAIN, pidOri_D_GAIN, pidOri_I_LIMIT, pidOri_EMA_SAMPLES;  
+
+//in StreamData;  //  UDP data
+
+MotorDrive motorA(PA, MA1, MA2);
+MotorDrive motorB(PB, MB1, MB2);
+
+// define BT communication
+SoftwareSerial mySerial(RX, TX);
+bool BTconnected = false;
+
+//Variable for storing received data from BT
+char buff[24];
+int prt = 0;
+int data;
+
+// MPU control/status vars
+bool dmpReady = false;  // set true if DMP init was successful
+uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
+uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
+uint16_t fifoCount;     // count of all bytes currently in FIFO
+uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+Quaternion q;           // [w, x, y, z]         quaternion container
+VectorInt16 aa;         // [x, y, z]            accel sensor measurements
+VectorInt16 aaReal;     // [x, y, z]            gravity-free accel sensor measurements
+VectorInt16 aaWorld;    // [x, y, z]            world-frame accel sensor measurements
+VectorFloat gravity;    // [x, y, z]            gravity vector
+float euler[3];         // [psi, theta, phi]    Euler angle container
+float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
+int16_t rate[3];  // store gyroscope values
+int16_t gy_rate;  // gy
+float gy_scale;
+
+// kalman filter
+KalmanFilter kalmanFilter;
+float kalmanAngle;
+float pitch, newPitch;
+float preTargetAngle = 0;
+unsigned long pretime, nowtime, preT;
+unsigned long duration = 0;
+
+volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
+void dmpDataReady() {
+    mpuInterrupt = true;
+}
+
+void setup() {
+
+  
+  // set standby to high
+  pinMode(STBY, OUTPUT);
+  digitalWrite(STBY, HIGH);
+
+  // setup mpu
+  #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+        Wire.begin();
+        TWBR = 24; // 400kHz I2C clock (200kHz if CPU is 8MHz)
+  #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+        Fastwire::setup(400, true);
+  #endif
+    
+  Serial.begin(38400);
+  mySerial.setTimeout(10);
+  // Init mpu
+  mpu.initialize();
+  devStatus = mpu.dmpInitialize();
+  mpu.setXGyroOffset(220);
+  mpu.setYGyroOffset(76);
+  mpu.setZGyroOffset(-85);
+  mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+  
+  // make sure mpu worked (returns 0 if so)
+  if (devStatus == 0) {
+      // turn on the DMP, now that it's ready
+      Serial.println(F("Enabling DMP..."));
+      mpu.setDMPEnabled(true);
+
+      // enable Arduino interrupt detection
+      Serial.println(F("Enabling interrupt detection (Arduino external interrupt 0)..."));
+      attachInterrupt(0, dmpDataReady, RISING);
+      mpuIntStatus = mpu.getIntStatus();
+
+      // set our DMP Ready flag so the main loop() function knows it's okay to use it
+      Serial.println(F("DMP ready! Waiting for first interrupt..."));
+      dmpReady = true;
+
+      // get expected DMP packet size for later comparison
+      packetSize = mpu.dmpGetFIFOPacketSize();
+  } else {
+      // ERROR!
+      // 1 = initial memory load failed
+      // 2 = DMP configuration updates failed
+      // (if it's going to break, usually the code will be 1)
+      Serial.print(F("DMP Initialization failed (code "));
+      Serial.print(devStatus);
+      Serial.println(F(")"));
+  }
+  // Start soft BT Serial port
+  mySerial.begin(38400);
+  
+    
+  //init pitch PID(inner) with predefined parameters
+#ifdef EEPROM_OPEN
+  // Init value of pitch PID by EEprom
+  pidP_P_GAIN = EEPROM.read(addr);
+  pidP_I_GAIN = EEPROM.read(addr + 4);
+  pidP_D_GAIN = EEPROM.read(addr + 8);
+#else
+  pidP_P_GAIN = PIDP_P_GAIN;   
+  pidP_I_GAIN = PIDP_I_GAIN;  
+  pidP_D_GAIN = PIDP_D_GAIN;
+#endif
+
+  pidP_I_LIMIT = PIDP_I_LIMIT;
+  pidP_EMA_SAMPLES = PIDP_EMA_SAMPLES;
+  controller.PIDinit(&pitchPID[0], &pidP_P_GAIN, &pidP_I_GAIN, &pidP_D_GAIN, &pidP_I_LIMIT, &pidP_EMA_SAMPLES);
+  controller.PIDinit(&pitchPID[1], &pidP_P_GAIN, &pidP_I_GAIN, &pidP_D_GAIN, &pidP_I_LIMIT, &pidP_EMA_SAMPLES);
+  
+  //init speed PID(outer) with predefined parameters
+  pidS_P_GAIN = PIDS_P_GAIN;   
+  pidS_I_GAIN = PIDS_I_GAIN;  
+  pidS_D_GAIN = PIDS_D_GAIN;  
+  pidS_I_LIMIT = PIDS_I_LIMIT;
+  pidS_EMA_SAMPLES = PIDS_EMA_SAMPLES;
+  controller.PIDinit(&speedPID[0], &pidS_P_GAIN, &pidS_I_GAIN, &pidS_D_GAIN, &pidS_I_LIMIT, &pidS_EMA_SAMPLES);
+  controller.PIDinit(&speedPID[1], &pidS_P_GAIN, &pidS_I_GAIN, &pidS_D_GAIN, &pidS_I_LIMIT, &pidS_EMA_SAMPLES);
+
+  //init orientation PID with predefined parameters
+  pidOri_P_GAIN = PIDO_P_GAIN;
+  pidOri_I_GAIN = PIDO_I_GAIN;
+  pidOri_D_GAIN = PIDO_D_GAIN;
+  pidOri_I_LIMIT = PIDO_I_LIMIT;
+  pidOri_EMA_SAMPLES = PIDS_EMA_SAMPLES; 
+  controller.PIDinit(&oriPID,&pidOri_P_GAIN, &pidOri_I_GAIN, &pidOri_D_GAIN, &pidOri_I_LIMIT, &pidOri_EMA_SAMPLES);
+  // setup kalmanFilter
+  getOrientation(pitch,gy_rate);
+  kalmanAngle = pitch;
+  kalmanFilter.setkalmanangle(pitch);
+  kalmanFilter.InitKalman();
+
+  preT = pretime = nowtime = millis();
+}
+
+
+
+
+void loop() {
+      //Serial.println(String("DriveTrim:") + driveTrim + String(" TurnTrim: ") + turnTrim);
+           
+      // check BT 
+      CheckBT();
+      
+      // calculate gy time
+      gy_scale = (millis()-preT) / 1000.0f;
+      preT = millis();
+      
+      // get pitch of robot
+      getOrientation(newPitch, gy_rate);
+
+      //calibrate angle by using kalmanFilter
+      pitch = 0.995 * (pitch + (gy_rate*gy_scale)) + (0.005 * newPitch); //0.995 & 0.005   
+
+      kalmanAngle = pitch;
+      //kalmanAngle = kalmanFilter.getkalmanangle(pitch, gy_rate, gy_scale); 
+      //Serial.write(int(kalmanAngle + 90));
+      // get pwm of motors
+      GetPwm();
+      
+      // run motor
+      MotorDriving();
+
+      //Serial.println(String("angle: ") + int(kalmanAngle + zero));
+}
+
+void MotorDriving(){
+  //Serial.println(pitchPIDoutput[0] + String("  ") + pitchPIDoutput[1]);
+  
+  if(pitchPIDoutput[0] < 0){
+    //Serial.println("A backward");
+    analogWrite(PA, -pitchPIDoutput[0]);
+    digitalWrite(MA1, HIGH);
+    digitalWrite(MA2, LOW);
+  }else{                   
+    analogWrite(PA, pitchPIDoutput[0]);
+    digitalWrite(MA1, LOW);
+    digitalWrite(MA2, HIGH);
+  }
+  if(pitchPIDoutput[1] < 0){
+    analogWrite(PB, -pitchPIDoutput[1]);
+    digitalWrite(MB1, HIGH);
+    digitalWrite(MB2, LOW);
+  }else{              
+    analogWrite(PB, pitchPIDoutput[1]);
+    digitalWrite(MB1, LOW);
+    digitalWrite(MB2, HIGH); 
+  } 
+}
+
+void CheckBT(){
+   if(mySerial.available() > 0)      // Send data only when you receive data:
+     {
+          mySerial.readBytesUntil(';',buff,24); //Read the incoming data & store into buff until ';' detected
+          commandHandler(buff);
+     }
+}
+
+
+void commandHandler(char buff[]){
+        const char* mode;
+        mode = strtok(buff,";,");
+        float x,y;
+        if(strncmp(mode, "CM", 2) == 0){
+            x = -atof(strtok(NULL," ;,"));
+            y = atof(strtok(NULL," ;,"));
+            if(x > -90 && x < 90 && y > -90 && y < 90){
+              if(x > 45) x = 45;
+              else if(x < -45) x = -45;           
+              if(y > 45) y = 45;
+              else if(y < -45) y = -45;
+              driveTrim = maxDrive * x / 45;
+              turnTrim = -maxTurn * y / 45;
+            }
+            //Serial.println(String("X: ")+x+String(" Y: ")+ y);
+        }else if(strncmp(mode, "CJ", 2) == 0){
+            x = -atof(strtok(NULL," ;,"));
+            y = atof(strtok(NULL," ;,"));
+            if(x >= -1 && x <= 1 && y >= -1 && y <= 1){
+              driveTrim = y * maxDrive;
+              turnTrim = x * maxTurn;
+            }
+        }else if(strncmp(mode, "CS", 2) == 0){
+            driveTrim = turnTrim = 0;
+        }else if(strncmp(mode, "SP", 2) == 0){
+            pidP_P_GAIN = P_range * atof(strtok(NULL," ;,"))/20;
+#ifdef EEPROM_OPEN
+            EEPROM.write(addr, pidP_P_GAIN);
+#endif
+            controller.PIDinit(&pitchPID[0], &pidP_P_GAIN, &pidP_I_GAIN, &pidP_D_GAIN, &pidP_I_LIMIT, &pidP_EMA_SAMPLES);
+            controller.PIDinit(&pitchPID[1], &pidP_P_GAIN, &pidP_I_GAIN, &pidP_D_GAIN, &pidP_I_LIMIT, &pidP_EMA_SAMPLES);
+        }else if(strncmp(mode, "SI", 2) == 0){
+            pidP_I_GAIN = I_range * atof(strtok(NULL," ;,"))/20;
+#ifdef EEPROM_OPEN
+            EEPROM.write(addr + 4, pidP_I_GAIN);
+#endif
+            controller.PIDinit(&pitchPID[0], &pidP_P_GAIN, &pidP_I_GAIN, &pidP_D_GAIN, &pidP_I_LIMIT, &pidP_EMA_SAMPLES);
+            controller.PIDinit(&pitchPID[1], &pidP_P_GAIN, &pidP_I_GAIN, &pidP_D_GAIN, &pidP_I_LIMIT, &pidP_EMA_SAMPLES);
+        }else if(strncmp(mode, "SD", 2) == 0){
+            pidP_D_GAIN = D_range * atof(strtok(NULL," ;,"))/20;
+#ifdef EEPROM_OPEN
+            EEPROM.write(addr + 8, pidP_D_GAIN);
+#endif
+            controller.PIDinit(&pitchPID[0], &pidP_P_GAIN, &pidP_I_GAIN, &pidP_D_GAIN, &pidP_I_LIMIT, &pidP_EMA_SAMPLES);
+            controller.PIDinit(&pitchPID[1], &pidP_P_GAIN, &pidP_I_GAIN, &pidP_D_GAIN, &pidP_I_LIMIT, &pidP_EMA_SAMPLES);
+        }
+          
+}
+
+void GetPwm(){
+      // timer
+        nowtime = millis();
+        duration = nowtime - pretime;
+        pretime = nowtime;
+      
+      //Serial.println(String("LeftStep: ") + LeftStep + String("RightStep: ") + RightStep);
+      if(fabs(LeftStep + RightStep)/2 > 10000 && !inRunAwayState){
+        Serial.println("Help! I'm running and not moving");
+        LeftStep = 0; RightStep = 0;
+        inRunAwayState = 1;
+      }
+    
+
+      if((inRunAwayState || fabs(-kalmanAngle + zero) > 40) && !inFalloverState){
+        digitalWrite(STBY, LOW);
+        inFalloverState = 1;
+        Serial.println("Help! I've fallen over and i cant get up =)");
+      }else if(fabs(kalmanAngle) < 10 && inFalloverState){
+        if(++inSteadyState == 100) {
+          inRunAwayState = 0;
+          inSteadyState = 0;
+          digitalWrite(STBY, HIGH);
+          inFalloverState = 0;
+          Serial.println("Thank you");
+        }
+      }else{
+        inSteadyState = 0;
+      }
+      if(!inFalloverState){
+        //Serial.println("not Fall yet");
+        smoothedDriveTrim = (0.6 * smoothedDriveTrim) + (0.4 * driveTrim);
+        //Drive operations
+        if(smoothedDriveTrim != 0){
+          LeftStep += smoothedDriveTrim;
+          RightStep += smoothedDriveTrim;
+        }
+        // Turn operations
+        smoothedTurnTrim = (0.6 * smoothedTurnTrim) + (0.4 * turnTrim);
+        if(smoothedTurnTrim != 0){
+          LeftStep -= smoothedTurnTrim;
+          RightStep += smoothedTurnTrim;
+        }
+
+        // Position PID output
+        speedPIDoutput[0] = controller.PIDUpdate(0, LeftStep, duration, &speedPID[0]);
+        speedPIDoutput[1] = controller.PIDUpdate(0, RightStep, duration, &speedPID[1]);
+          
+        Serial.println(String("Speed left: ") + speedPIDoutput[0] + String(" Speed right: ") + speedPIDoutput[1]);
+        // Step difference
+        int posDiff = LeftStep - RightStep;
+        oriOutput = controller.PIDUpdate(0, posDiff, duration, &oriPID);
+        /*
+        SP_L = speedPIDoutput[0] - oriOutput;
+        SP_R = speedPIDoutput[1] + oriOutput;
+        // constrain the target angle
+        if(fabs(SP_L) > maxAngle){
+          SP_L = maxAngle * SP_L / fabs(SP_L);
+        }
+        if(fabs(SP_R) > maxAngle){
+          SP_R = maxAngle * SP_R / fabs(SP_R);
+        }
+        */
+        // Pitch PID output (PWM)
+        pitchPIDoutput[0] = controller.PIDUpdate(speedPIDoutput[0] - oriOutput, -kalmanAngle + zero, duration, &pitchPID[0]);
+        pitchPIDoutput[1] = controller.PIDUpdate(speedPIDoutput[1] + oriOutput, -kalmanAngle + zero, duration, &pitchPID[1]); 
+        Serial.println(String("angle: ") + int(-kalmanAngle + zero));
+        //Serial.println(String("Parameter: ")+ pitchPID[0].lastFeedbackReading + String(" ") + pitchPID[0].differentialError + String(" ") + pitchPID[0].accumulatedError + String(" ") + pitchPID[0].error);
+        //Serial.println(String("Angle: ")+ angle);
+
+        // constain value within 0 - 255
+        if (pitchPIDoutput[0] > 255.0) pitchPIDoutput[0] = 255.0;
+        if (pitchPIDoutput[1] > 255.0) pitchPIDoutput[1] = 255.0;
+        if (pitchPIDoutput[0] < -255.0) pitchPIDoutput[0] = -255.0;
+        if (pitchPIDoutput[1] < -255.0) pitchPIDoutput[1] = -255.0;
+        //Serial.println(String("pwm ") + pitchPIDoutput[0]);
+        //Serial.println(String("speedPIDoutput ") + speedPIDoutput[0]);
+        //Serial.println(String("oriOutput ") + oriOutput);
+        //Serial.println(String("duration ") + duration);
+        
+        // PWM value calibration: map value, and constraint the value
+        pitchPIDoutput[0] = pitchPIDoutput[0] > 0? map(pitchPIDoutput[0], 0, 255, motor_min, 255):-map(-pitchPIDoutput[0], 0, 255, motor_min, 255);
+        pitchPIDoutput[1] = pitchPIDoutput[1] > 0? map(pitchPIDoutput[1], 0, 255, motor_min, 255):-map(-pitchPIDoutput[1], 0, 255, motor_min, 255);
+        // PWM feedback to Step counter
+        LeftStep -= pitchPIDoutput[0];
+        RightStep -= pitchPIDoutput[1];
+        
+      }else{
+        LeftStep = 0; RightStep = 0;
+        // init pitchPID value of 
+        pitchPID[0].accumulatedError = 0;
+        pitchPID[1].accumulatedError = 0;
+        speedPID[0].accumulatedError = 0;
+        speedPID[1].accumulatedError = 0;
+        oriPID.accumulatedError = 0;
+        driveTrim = 0;
+        turnTrim = 0;
+        smoothedTurnTrim = 0;
+        smoothedDriveTrim = 0;
+      }
+      
+      //Serial.println(angle);
+}
+
+
+void getOrientation(float& pitch, int16_t& gy_rate){
+  // put your main code here, to run repeatedly:
+  if (!dmpReady) return;
+  // wait for MPU interrupt or extra packet(s) available
+  
+  while (!mpuInterrupt && fifoCount < packetSize) {
+        // other program behavior stuff here
+        // .
+        // .
+        // .
+        // if you are really paranoid you can frequently test in between other
+        // stuff to see if mpuInterrupt is true, and if so, "break;" from the
+        // while() loop to immediately process the MPU data
+        // .
+        // .
+        // .
+    }
+    
+    // reset interrupt flag and get INT_STATUS byte
+    mpuInterrupt = false;
+    mpuIntStatus = mpu.getIntStatus();
+
+    // get current FIFO count
+    fifoCount = mpu.getFIFOCount();
+
+    // check for overflow (this should never happen unless our code is too inefficient)
+    if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
+        // reset so we can continue cleanly
+        mpu.resetFIFO();
+        Serial.println(F("FIFO overflow!"));
+
+    // otherwise, check for DMP data ready interrupt (this should happen frequently)
+    } else if (mpuIntStatus & 0x02) {
+        // wait for correct available data length, should be a VERY short wait
+        while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+
+        // read a packet from FIFO
+        mpu.getFIFOBytes(fifoBuffer, packetSize);
+        
+        // track FIFO count here in case there is > 1 packet available
+        // (this lets us immediately read more without waiting for an interrupt)
+        fifoCount -= packetSize;
+        // display Euler angles in degrees
+            mpu.dmpGetQuaternion(&q, fifoBuffer);
+            mpu.dmpGetGyro(rate, fifoBuffer);
+            mpu.dmpGetGravity(&gravity, &q);
+            mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+            /*
+            Serial.print("ypr\t");
+            Serial.print(ypr[0] * 180/M_PI);
+            Serial.print("\t");
+            Serial.print(ypr[1] * 180/M_PI);
+            Serial.print("\t");
+            Serial.println(ypr[2] * 180/M_PI);
+            */
+            
+    }
+    pitch = ypr[1] * 180/M_PI;
+    gy_rate = -rate[1];
+}
+
+
+
+
